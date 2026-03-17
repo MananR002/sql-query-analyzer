@@ -4,6 +4,31 @@ SQL Query Analyzer CLI Tool
 A simple CLI tool that accepts SQL queries and provides analysis insights.
 """
 
+from tokenizer import tokenize, TokenType, tokenize_ignore_whitespace
+
+
+def format_tokens(tokens: list) -> str:
+    """
+    Formats token list for display.
+    
+    Args:
+        tokens: List of Token objects
+        
+    Returns:
+        Formatted string representation of tokens
+    """
+    lines = []
+    lines.append(f"\nTotal tokens: {len(tokens)}")
+    lines.append("-" * 50)
+    lines.append(f"{'Type':<20} {'Value':<25} {'Pos'}")
+    lines.append("-" * 50)
+    
+    for token in tokens:
+        value_display = repr(token.value) if len(token.value) > 20 else token.value
+        lines.append(f"{token.type.name:<20} {value_display:<25} {token.position}")
+    
+    return "\n".join(lines)
+
 
 def analyze_query(query: str) -> dict:
     """
@@ -13,12 +38,22 @@ def analyze_query(query: str) -> dict:
         query: The SQL query string to analyze
         
     Returns:
-        A dictionary containing analysis results with 'issues' and 'suggestions' keys
+        A dictionary containing analysis results with 'issues', 'suggestions', 
+        and 'tokens' keys
     """
-    # Placeholder implementation - will be expanded with actual analysis logic
+    # Tokenize the query
+    all_tokens = tokenize(query)
+    meaningful_tokens = tokenize_ignore_whitespace(query)
+    
+    # Placeholder analysis - will be expanded
+    issues = []
+    suggestions = []
+    
     return {
-        "issues": [],
-        "suggestions": []
+        "issues": issues,
+        "suggestions": suggestions,
+        "tokens": all_tokens,
+        "token_count": len(meaningful_tokens)
     }
 
 
@@ -33,9 +68,12 @@ def format_results(results: dict) -> str:
         A formatted string for terminal output
     """
     lines = []
-    lines.append("=" * 50)
+    lines.append("\n" + "=" * 50)
     lines.append("SQL QUERY ANALYSIS RESULTS")
     lines.append("=" * 50)
+    
+    # Token stats
+    lines.append(f"\n📊 Token Count: {results.get('token_count', 0)} (excluding whitespace)")
     
     # Issues section
     lines.append("\n📋 Issues Found:")
@@ -105,7 +143,13 @@ def main():
     print("\nAnalyzing query...")
     results = analyze_query(query)
     
-    # Display formatted results
+    # Display tokenization results
+    print("\n" + "=" * 50)
+    print("TOKENS:")
+    print("=" * 50)
+    print(format_tokens(results["tokens"]))
+    
+    # Display formatted analysis results
     formatted_output = format_results(results)
     print(formatted_output)
 
