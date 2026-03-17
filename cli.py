@@ -94,8 +94,8 @@ def analyze_query(query: str) -> dict:
     # Parse the query structure
     parsed = parse_query(query)
     
-    # Analyze the parsed query for issues and suggestions
-    analysis = analyze_parsed_query(parsed)
+    # Analyze the parsed query for issues and suggestions (pass tokens for typo detection)
+    analysis = analyze_parsed_query(parsed, meaningful_tokens)
     
     return {
         "issues": analysis["issues"],

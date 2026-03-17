@@ -5,6 +5,7 @@ Analyzes parsed SQL queries to identify issues and provide improvement suggestio
 """
 
 from parser import ParsedQuery
+from tokenizer import Token, TokenType, SQL_KEYWORDS
 
 
 def create_issue(title: str, explanation: str, confidence: float) -> dict:
@@ -23,6 +24,89 @@ def create_suggestion(title: str, explanation: str, confidence: float) -> dict:
         "explanation": explanation,
         "confidence": round(confidence, 2)
     }
+
+
+def find_closest_keyword(token_value: str) -> str | None:
+    """
+    Finds the closest matching SQL keyword for a potential typo.
+    
+    Uses simple character overlap and length similarity to find likely matches.
+    
+    Args:
+        token_value: The identifier token value to check
+        
+    Returns:
+        Closest keyword match or None if no close match found
+    """
+    token_upper = token_value.upper()
+    
+    if token_upper in SQL_KEYWORDS:
+        return None  # It's already a valid keyword
+    
+    # Skip very short tokens (likely not typos)
+    if len(token_upper) < 2:
+        return None
+    
+    best_match = None
+    best_score = 0
+    
+    for keyword in SQL_KEYWORDS:
+        # Quick checks for common typo patterns
+        
+        # Check if it's a substring (e.g., "LIK" is substring of "LIKE")
+        if token_upper in keyword and len(token_upper) >= len(keyword) - 2:
+            score = len(token_upper) / len(keyword)
+            if score > best_score:
+                best_score = score
+                best_match = keyword
+        
+        # Check if keyword is substring of token (extra chars added)
+        elif keyword in token_upper and len(keyword) >= len(token_upper) - 2:
+            score = len(keyword) / len(token_upper)
+            if score > best_score:
+                best_score = score
+                best_match = keyword
+        
+        # Check character overlap for similar length tokens
+        elif abs(len(token_upper) - len(keyword)) <= 2:
+            common_chars = set(token_upper) & set(keyword)
+            if len(common_chars) >= min(len(token_upper), len(keyword)) - 1:
+                overlap_ratio = len(common_chars) / max(len(token_upper), len(keyword))
+                if overlap_ratio >= 0.7 and overlap_ratio > best_score:
+                    best_score = overlap_ratio
+                    best_match = keyword
+    
+    return best_match if best_score >= 0.5 else None
+
+
+def analyze_keyword_typos(tokens: list[Token]) -> tuple[list[dict], list[dict]]:
+    """
+    Checks for potential typos in SQL keywords.
+    
+    Scans IDENTIFIER tokens and compares them against known keywords.
+    
+    Returns:
+        Tuple of (issues, suggestions)
+    """
+    issues = []
+    suggestions = []
+    
+    for token in tokens:
+        if token.type == TokenType.IDENTIFIER:
+            closest = find_closest_keyword(token.value)
+            if closest:
+                issues.append(create_issue(
+                    title=f"Potential typo: '{token.value}' might be '{closest}'",
+                    explanation=f"The identifier '{token.value}' is not a recognized keyword but closely matches SQL keyword '{closest}'. This could be a typo that will cause a syntax error or unexpected behavior.",
+                    confidence=0.85
+                ))
+                suggestions.append(create_suggestion(
+                    title=f"Change '{token.value}' to '{closest}'",
+                    explanation=f"Replace '{token.value}' with '{closest}' if you intended to use the SQL keyword. Verify the context to ensure this is the correct fix.",
+                    confidence=0.85
+                ))
+    
+    return issues, suggestions
 
 
 def analyze_select_star(parsed: ParsedQuery) -> tuple[list[dict], list[dict]]:
@@ -292,12 +376,13 @@ def analyze_distinct_usage(parsed: ParsedQuery) -> tuple[list[dict], list[dict]]
     return issues, suggestions
 
 
-def analyze_query(parsed: ParsedQuery) -> dict:
+def analyze_query(parsed: ParsedQuery, tokens: list[Token] | None = None) -> dict:
     """
     Analyzes a parsed SQL query and returns issues and suggestions.
     
     Args:
         parsed: A ParsedQuery object containing the parsed query components
+        tokens: Optional list of tokens for keyword typo detection
         
     Returns:
         A dictionary with 'issues' and 'suggestions' keys containing structured objects
@@ -305,7 +390,7 @@ def analyze_query(parsed: ParsedQuery) -> dict:
     all_issues = []
     all_suggestions = []
     
-    # Run all analysis functions
+    # Run parsed-based analysis functions
     analyzers = [
         analyze_select_star,
         analyze_missing_where,
@@ -322,6 +407,12 @@ def analyze_query(parsed: ParsedQuery) -> dict:
         issues, suggestions = analyzer(parsed)
         all_issues.extend(issues)
         all_suggestions.extend(suggestions)
+    
+    # Run token-based analysis if tokens provided
+    if tokens:
+        typo_issues, typo_suggestions = analyze_keyword_typos(tokens)
+        all_issues.extend(typo_issues)
+        all_suggestions.extend(typo_suggestions)
     
     return {
         "issues": all_issues,
