@@ -5,6 +5,51 @@ A simple CLI tool that accepts SQL queries and provides analysis insights.
 """
 
 from tokenizer import tokenize, TokenType, tokenize_ignore_whitespace
+from parser import parse_query
+
+
+def format_parsed_structure(parsed) -> str:
+    """
+    Formats the parsed query structure for display.
+    
+    Args:
+        parsed: A ParsedQuery object
+        
+    Returns:
+        Formatted JSON-like string representation
+    """
+    result_dict = parsed.to_dict()
+    
+    lines = []
+    lines.append("\n{")
+    
+    # Query type
+    lines.append(f'  "query_type": {repr(result_dict.get("query_type"))},')
+    
+    # SELECT columns
+    if "select" in result_dict:
+        select_cols = result_dict["select"]
+        if select_cols:
+            lines.append(f'  "select": {select_cols},')
+        else:
+            lines.append('  "select": [],')
+    
+    # FROM table
+    if "from" in result_dict:
+        from_table = result_dict["from"]
+        lines.append(f'  "from": {repr(from_table)},')
+    
+    # WHERE conditions
+    if "where" in result_dict:
+        where_conds = result_dict["where"]
+        if where_conds:
+            lines.append(f'  "where": {where_conds}')
+        else:
+            lines.append('  "where": []')
+    
+    lines.append("}")
+    
+    return "\n".join(lines)
 
 
 def format_tokens(tokens: list) -> str:
@@ -39,11 +84,14 @@ def analyze_query(query: str) -> dict:
         
     Returns:
         A dictionary containing analysis results with 'issues', 'suggestions', 
-        and 'tokens' keys
+        'tokens', and 'parsed' keys
     """
     # Tokenize the query
     all_tokens = tokenize(query)
     meaningful_tokens = tokenize_ignore_whitespace(query)
+    
+    # Parse the query structure
+    parsed = parse_query(query)
     
     # Placeholder analysis - will be expanded
     issues = []
@@ -53,7 +101,8 @@ def analyze_query(query: str) -> dict:
         "issues": issues,
         "suggestions": suggestions,
         "tokens": all_tokens,
-        "token_count": len(meaningful_tokens)
+        "token_count": len(meaningful_tokens),
+        "parsed": parsed
     }
 
 
@@ -142,6 +191,12 @@ def main():
     # Analyze the query
     print("\nAnalyzing query...")
     results = analyze_query(query)
+    
+    # Display parsed structure
+    print("\n" + "=" * 50)
+    print("PARSED STRUCTURE:")
+    print("=" * 50)
+    print(format_parsed_structure(results["parsed"]))
     
     # Display tokenization results
     print("\n" + "=" * 50)
