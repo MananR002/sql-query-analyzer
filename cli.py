@@ -117,30 +117,36 @@ def format_results(results: dict) -> str:
         A formatted string for terminal output
     """
     lines = []
-    lines.append("\n" + "=" * 50)
+    lines.append("\n" + "=" * 60)
     lines.append("SQL QUERY ANALYSIS RESULTS")
-    lines.append("=" * 50)
+    lines.append("=" * 60)
     
     # Token stats
     lines.append(f"\n📊 Token Count: {results.get('token_count', 0)} (excluding whitespace)")
     
     # Issues section
     lines.append("\n📋 Issues Found:")
-    if results.get("issues"):
-        for i, issue in enumerate(results["issues"], 1):
-            lines.append(f"  {i}. {issue}")
+    issues = results.get("issues", [])
+    if issues:
+        for i, issue in enumerate(issues, 1):
+            lines.append(f"\n  {i}. {issue['issue']}")
+            lines.append(f"     Confidence: {issue['confidence']:.0%}")
+            lines.append(f"     {issue['explanation']}")
     else:
         lines.append("  ✓ No issues detected")
     
     # Suggestions section
-    lines.append("\n💡 Suggestions:")
-    if results.get("suggestions"):
-        for i, suggestion in enumerate(results["suggestions"], 1):
-            lines.append(f"  {i}. {suggestion}")
+    lines.append("\n\n💡 Suggestions:")
+    suggestions = results.get("suggestions", [])
+    if suggestions:
+        for i, suggestion in enumerate(suggestions, 1):
+            lines.append(f"\n  {i}. {suggestion['suggestion']}")
+            lines.append(f"     Confidence: {suggestion['confidence']:.0%}")
+            lines.append(f"     {suggestion['explanation']}")
     else:
         lines.append("  ✓ No suggestions at this time")
     
-    lines.append("\n" + "=" * 50)
+    lines.append("\n" + "=" * 60)
     return "\n".join(lines)
 
 

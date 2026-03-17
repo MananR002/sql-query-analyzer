@@ -7,7 +7,25 @@ Analyzes parsed SQL queries to identify issues and provide improvement suggestio
 from parser import ParsedQuery
 
 
-def analyze_select_star(parsed: ParsedQuery) -> tuple[list[str], list[str]]:
+def create_issue(title: str, explanation: str, confidence: float) -> dict:
+    """Creates a structured issue dictionary."""
+    return {
+        "issue": title,
+        "explanation": explanation,
+        "confidence": round(confidence, 2)
+    }
+
+
+def create_suggestion(title: str, explanation: str, confidence: float) -> dict:
+    """Creates a structured suggestion dictionary."""
+    return {
+        "suggestion": title,
+        "explanation": explanation,
+        "confidence": round(confidence, 2)
+    }
+
+
+def analyze_select_star(parsed: ParsedQuery) -> tuple[list[dict], list[dict]]:
     """
     Checks for SELECT * usage.
     
@@ -18,13 +36,21 @@ def analyze_select_star(parsed: ParsedQuery) -> tuple[list[str], list[str]]:
     suggestions = []
     
     if parsed.select_columns and parsed.select_columns[0].strip() == '*':
-        issues.append("SELECT * retrieves all columns which can cause unnecessary data transfer")
-        suggestions.append("Specify only the columns you need instead of SELECT *")
+        issues.append(create_issue(
+            title="SELECT * retrieves all columns",
+            explanation="Using SELECT * fetches every column from the table, which increases network overhead, memory usage, and can break application code if table schema changes. It also prevents the query optimizer from using covering indexes.",
+            confidence=0.95
+        ))
+        suggestions.append(create_suggestion(
+            title="Specify only the columns you need",
+            explanation="List each column explicitly (e.g., SELECT id, name, email). This reduces data transfer, improves cache efficiency, and makes your query more resilient to schema changes.",
+            confidence=0.95
+        ))
     
     return issues, suggestions
 
 
-def analyze_missing_where(parsed: ParsedQuery) -> tuple[list[str], list[str]]:
+def analyze_missing_where(parsed: ParsedQuery) -> tuple[list[dict], list[dict]]:
     """
     Checks for missing WHERE clause on SELECT/UPDATE/DELETE.
     
@@ -36,19 +62,43 @@ def analyze_missing_where(parsed: ParsedQuery) -> tuple[list[str], list[str]]:
     
     if parsed.query_type in ('SELECT', 'UPDATE', 'DELETE') and not parsed.where_conditions:
         if parsed.query_type == 'SELECT':
-            issues.append("SELECT without WHERE clause may perform a full table scan")
-            suggestions.append("Add a WHERE clause to filter rows and reduce data scanned")
+            issues.append(create_issue(
+                title="SELECT without WHERE may scan entire table",
+                explanation="Without a WHERE clause, the database must read every row in the table. This is slow for large tables and wastes I/O and memory resources.",
+                confidence=0.90
+            ))
+            suggestions.append(create_suggestion(
+                title="Add a WHERE clause to filter rows",
+                explanation="Include conditions to limit results (e.g., WHERE status = 'active'). This allows the database to use indexes and significantly reduces rows processed.",
+                confidence=0.90
+            ))
         elif parsed.query_type == 'UPDATE':
-            issues.append("UPDATE without WHERE clause will modify ALL rows in the table")
-            suggestions.append("Add a WHERE clause to limit which rows are updated")
+            issues.append(create_issue(
+                title="UPDATE without WHERE modifies all rows",
+                explanation="This is a dangerous operation that will change every row in the table. In production, this could corrupt all your data.",
+                confidence=1.0
+            ))
+            suggestions.append(create_suggestion(
+                title="Add a WHERE clause to limit affected rows",
+                explanation="Always specify which rows to update (e.g., WHERE id = 123). Test with a SELECT first to verify you're updating the right rows.",
+                confidence=1.0
+            ))
         elif parsed.query_type == 'DELETE':
-            issues.append("DELETE without WHERE clause will remove ALL rows from the table")
-            suggestions.append("Add a WHERE clause to limit which rows are deleted")
+            issues.append(create_issue(
+                title="DELETE without WHERE removes all rows",
+                explanation="This will delete every row in the table. Without a backup, this data loss may be unrecoverable.",
+                confidence=1.0
+            ))
+            suggestions.append(create_suggestion(
+                title="Add a WHERE clause to limit deletions",
+                explanation="Specify which rows to delete (e.g., WHERE created_at < '2020-01-01'). Always run as SELECT first to verify the rows, and ensure backups exist.",
+                confidence=1.0
+            ))
     
     return issues, suggestions
 
 
-def analyze_limit_clause(parsed: ParsedQuery, has_order_by: bool = False) -> tuple[list[str], list[str]]:
+def analyze_limit_clause(parsed: ParsedQuery) -> tuple[list[dict], list[dict]]:
     """
     Checks for missing LIMIT clause on SELECT queries.
     
@@ -58,16 +108,22 @@ def analyze_limit_clause(parsed: ParsedQuery, has_order_by: bool = False) -> tup
     issues = []
     suggestions = []
     
-    # This is a simplified check - in reality we'd parse LIMIT from the query
-    # For now, we'll suggest LIMIT for queries without WHERE that return many rows
     if parsed.query_type == 'SELECT' and not parsed.where_conditions:
-        issues.append("Query may return large result set without LIMIT")
-        suggestions.append("Consider adding a LIMIT clause to control result size")
+        issues.append(create_issue(
+            title="Query may return large result set",
+            explanation="Without a LIMIT clause, the query could return millions of rows if the table is large, causing memory issues in your application and database.",
+            confidence=0.75
+        ))
+        suggestions.append(create_suggestion(
+            title="Add a LIMIT clause to control result size",
+            explanation="Use LIMIT (or TOP/FETCH FIRST depending on your database) to cap results (e.g., LIMIT 100). Combine with pagination for large datasets.",
+            confidence=0.75
+        ))
     
     return issues, suggestions
 
 
-def analyze_like_patterns(parsed: ParsedQuery) -> tuple[list[str], list[str]]:
+def analyze_like_patterns(parsed: ParsedQuery) -> tuple[list[dict], list[dict]]:
     """
     Checks for LIKE patterns that can't use indexes (leading wildcards).
     
@@ -88,15 +144,21 @@ def analyze_like_patterns(parsed: ParsedQuery) -> tuple[list[str], list[str]]:
                     pattern = parts[1].strip()
                     # Check if pattern starts with % or _
                     if pattern.startswith("'%") or pattern.startswith('"%'):
-                        issues.append(f"LIKE pattern with leading wildcard cannot use index: {condition.strip()}")
-                        suggestions.append("Consider removing leading wildcard or using full-text search")
-                    elif pattern.startswith("'_") or pattern.startswith('"_'):
-                        issues.append(f"LIKE pattern with leading underscore may not use index efficiently: {condition.strip()}")
+                        issues.append(create_issue(
+                            title="LIKE pattern with leading wildcard cannot use index",
+                            explanation=f"The pattern '{pattern}' starts with a wildcard, forcing a full table scan. The database cannot use B-tree indexes for prefix wildcards.",
+                            confidence=0.90
+                        ))
+                        suggestions.append(create_suggestion(
+                            title="Remove leading wildcard or use full-text search",
+                            explanation="If possible, use 'prefix%' instead of '%suffix'. For complex text search, consider database full-text search features or dedicated search engines like Elasticsearch.",
+                            confidence=0.85
+                        ))
     
     return issues, suggestions
 
 
-def analyze_not_conditions(parsed: ParsedQuery) -> tuple[list[str], list[str]]:
+def analyze_not_conditions(parsed: ParsedQuery) -> tuple[list[dict], list[dict]]:
     """
     Checks for NOT conditions that may be inefficient.
     
@@ -111,18 +173,34 @@ def analyze_not_conditions(parsed: ParsedQuery) -> tuple[list[str], list[str]]:
         
         # Check for NOT IN
         if ' NOT IN ' in condition_upper:
-            issues.append(f"NOT IN can be slow and may have NULL handling issues: {condition.strip()}")
-            suggestions.append("Consider using LEFT JOIN with IS NULL or NOT EXISTS instead of NOT IN")
+            issues.append(create_issue(
+                title="NOT IN can be slow and has NULL handling issues",
+                explanation="NOT IN performs poorly on large lists and returns no results if the subquery contains NULL values, which can cause subtle bugs.",
+                confidence=0.80
+            ))
+            suggestions.append(create_suggestion(
+                title="Use LEFT JOIN with IS NULL or NOT EXISTS instead",
+                explanation="Replace 'WHERE x NOT IN (SELECT y FROM t)' with 'WHERE NOT EXISTS (SELECT 1 FROM t WHERE y = x)' or use a LEFT JOIN with 'WHERE t.y IS NULL'.",
+                confidence=0.80
+            ))
         
         # Check for != or <>
         if '!=' in condition or '<>' in condition:
-            issues.append(f"Inequality operators (!=, <>) may not use indexes efficiently: {condition.strip()}")
-            suggestions.append("Consider if an equality condition or range query could be used instead")
+            issues.append(create_issue(
+                title="Inequality operators may not use indexes efficiently",
+                explanation="The != and <> operators often prevent index usage or require scanning large portions of the index, especially for high-cardinality columns.",
+                confidence=0.70
+            ))
+            suggestions.append(create_suggestion(
+                title="Consider if equality or range conditions could work",
+                explanation="If possible, restructure to use =, >, <, or BETWEEN. For excluding specific values, consider if the values can be filtered in application code instead.",
+                confidence=0.60
+            ))
     
     return issues, suggestions
 
 
-def analyze_or_conditions(parsed: ParsedQuery) -> tuple[list[str], list[str]]:
+def analyze_or_conditions(parsed: ParsedQuery) -> tuple[list[dict], list[dict]]:
     """
     Checks for OR conditions that may be inefficient.
     
@@ -132,14 +210,12 @@ def analyze_or_conditions(parsed: ParsedQuery) -> tuple[list[str], list[str]]:
     issues = []
     suggestions = []
     
-    # Check if WHERE conditions contain OR
-    # The parser splits by AND/OR, so we need to look at the original query
-    # For now, check if there are multiple conditions that might use OR
+    # Placeholder for future OR condition analysis
     
     return issues, suggestions
 
 
-def analyze_functions_in_where(parsed: ParsedQuery) -> tuple[list[str], list[str]]:
+def analyze_functions_in_where(parsed: ParsedQuery) -> tuple[list[dict], list[dict]]:
     """
     Checks for functions applied to columns in WHERE clause.
     
@@ -150,7 +226,6 @@ def analyze_functions_in_where(parsed: ParsedQuery) -> tuple[list[str], list[str
     suggestions = []
     
     for condition in parsed.where_conditions:
-        # Simple check for function patterns (word followed by opening paren)
         condition_upper = condition.upper()
         
         # Common functions that prevent index usage
@@ -159,14 +234,23 @@ def analyze_functions_in_where(parsed: ParsedQuery) -> tuple[list[str], list[str
         
         for func in functions:
             if func in condition_upper:
-                issues.append(f"Function on column in WHERE prevents index usage: {condition.strip()}")
-                suggestions.append(f"Consider storing pre-computed values or using a computed column instead of applying {func.strip('(')}() in WHERE")
+                func_name = func.strip('(')
+                issues.append(create_issue(
+                    title=f"Function {func_name}() on column prevents index usage",
+                    explanation=f"Applying {func_name}() to a column in the WHERE clause forces the database to evaluate the function for every row, preventing index lookups.",
+                    confidence=0.85
+                ))
+                suggestions.append(create_suggestion(
+                    title="Store pre-computed values or use a computed column",
+                    explanation=f"Instead of 'WHERE {func_name}(column) = value', store the computed value in a separate column with an index, or use a function-based index if your database supports it.",
+                    confidence=0.80
+                ))
                 break
     
     return issues, suggestions
 
 
-def analyze_column_count(parsed: ParsedQuery) -> tuple[list[str], list[str]]:
+def analyze_column_count(parsed: ParsedQuery) -> tuple[list[dict], list[dict]]:
     """
     Checks if too many columns are being selected.
     
@@ -179,13 +263,21 @@ def analyze_column_count(parsed: ParsedQuery) -> tuple[list[str], list[str]]:
     if parsed.select_columns:
         col_count = len(parsed.select_columns)
         if col_count > 10:
-            issues.append(f"Query selects {col_count} columns which may impact performance")
-            suggestions.append("Select only the columns you actually need")
+            issues.append(create_issue(
+                title=f"Query selects {col_count} columns",
+                explanation="Selecting many columns increases memory usage, network transfer, and processing time. It also reduces the chance that a covering index can be used.",
+                confidence=0.70
+            ))
+            suggestions.append(create_suggestion(
+                title="Select only the columns your application needs",
+                explanation="Review which columns are actually used in your application. Removing unused columns can significantly improve query performance and reduce resource usage.",
+                confidence=0.75
+            ))
     
     return issues, suggestions
 
 
-def analyze_distinct_usage(parsed: ParsedQuery) -> tuple[list[str], list[str]]:
+def analyze_distinct_usage(parsed: ParsedQuery) -> tuple[list[dict], list[dict]]:
     """
     Checks for DISTINCT that might indicate data quality issues.
     
@@ -195,8 +287,7 @@ def analyze_distinct_usage(parsed: ParsedQuery) -> tuple[list[str], list[str]]:
     issues = []
     suggestions = []
     
-    # This would need access to the raw tokens or query string
-    # For now, placeholder for future enhancement
+    # Placeholder for future DISTINCT analysis
     
     return issues, suggestions
 
@@ -209,7 +300,7 @@ def analyze_query(parsed: ParsedQuery) -> dict:
         parsed: A ParsedQuery object containing the parsed query components
         
     Returns:
-        A dictionary with 'issues' and 'suggestions' keys
+        A dictionary with 'issues' and 'suggestions' keys containing structured objects
     """
     all_issues = []
     all_suggestions = []
