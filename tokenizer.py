@@ -185,6 +185,10 @@ def tokenize(sql: str) -> list[Token]:
                     tokens.append(Token(TokenType.OPERATOR, two_char, start_pos))
                     i += 2
                     continue
+            # Single < or > not part of two-char operator
+            tokens.append(Token(TokenType.OPERATOR, char, start_pos))
+            i += 1
+            continue
         
         # Handle single-character operators
         if char in '+-*/%=!&|^~':
