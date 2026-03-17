@@ -6,6 +6,7 @@ A simple CLI tool that accepts SQL queries and provides analysis insights.
 
 from tokenizer import tokenize, TokenType, tokenize_ignore_whitespace
 from parser import parse_query
+from analyzer import analyze_query as analyze_parsed_query
 
 
 def format_parsed_structure(parsed) -> str:
@@ -93,13 +94,12 @@ def analyze_query(query: str) -> dict:
     # Parse the query structure
     parsed = parse_query(query)
     
-    # Placeholder analysis - will be expanded
-    issues = []
-    suggestions = []
+    # Analyze the parsed query for issues and suggestions
+    analysis = analyze_parsed_query(parsed)
     
     return {
-        "issues": issues,
-        "suggestions": suggestions,
+        "issues": analysis["issues"],
+        "suggestions": analysis["suggestions"],
         "tokens": all_tokens,
         "token_count": len(meaningful_tokens),
         "parsed": parsed
