@@ -231,6 +231,9 @@ def analyze_like_patterns(parsed: ParsedQuery) -> tuple[list[dict], list[dict]]:
     """
     Checks for LIKE patterns that can't use indexes (leading wildcards).
     
+    Detects both correctly spelled LIKE and potential typos by checking for
+    string literals with leading wildcards in WHERE conditions.
+    
     Returns:
         Tuple of (issues, suggestions)
     """
@@ -238,27 +241,53 @@ def analyze_like_patterns(parsed: ParsedQuery) -> tuple[list[dict], list[dict]]:
     suggestions = []
     
     for condition in parsed.where_conditions:
-        condition_upper = condition.upper()
-        if ' LIKE ' in condition_upper:
-            # Check for leading wildcard patterns
-            if '%' in condition or '_' in condition:
-                # Extract the pattern part (after LIKE)
-                parts = condition_upper.split(' LIKE ')
-                if len(parts) > 1:
-                    pattern = parts[1].strip()
-                    # Check if pattern starts with % or _
-                    if pattern.startswith("'%") or pattern.startswith('"%'):
-                        issues.append(create_issue(
-                            title="LIKE pattern with leading wildcard cannot use index",
-                            explanation=f"The pattern '{pattern}' starts with a wildcard, forcing a full table scan. The database cannot use B-tree indexes for prefix wildcards.",
-                            confidence=0.90,
-                            severity="medium"
-                        ))
-                        suggestions.append(create_suggestion(
-                            title="Remove leading wildcard or use full-text search",
-                            explanation="If possible, use 'prefix%' instead of '%suffix'. For complex text search, consider database full-text search features or dedicated search engines like Elasticsearch.",
-                            confidence=0.85
-                        ))
+        # Check for string literals with leading wildcards
+        # This pattern matches both ' LIKE ' and potential typos like ' LIK '
+        # by looking for quoted strings starting with % or _
+        
+        # Simple heuristic: look for '% or "% patterns in the condition
+        # which indicate leading wildcards in string literals
+        i = 0
+        while i < len(condition):
+            # Look for single or double quoted strings starting with % or _
+            if condition[i] == "'" or condition[i] == '"':
+                quote_char = condition[i]
+                # Check if next character is a wildcard
+                if i + 1 < len(condition) and condition[i + 1] in ('%', '_'):
+                    # Extract the pattern for display
+                    j = i + 1
+                    while j < len(condition) and condition[j] != quote_char:
+                        j += 1
+                    pattern = condition[i:j+1]
+                    
+                    # Check if this looks like a LIKE pattern (has LIKE-like keyword nearby)
+                    condition_upper = condition.upper()
+                    has_like_keyword = any(kw in condition_upper for kw in ['LIKE', 'LIK', 'LKE', 'LIQE'])
+                    
+                    issue_title = "LIKE pattern with leading wildcard cannot use index"
+                    if not has_like_keyword:
+                        issue_title = "Possible LIKE pattern with leading wildcard cannot use index"
+                    
+                    issues.append(create_issue(
+                        title=issue_title,
+                        explanation=f"The pattern {pattern} starts with a wildcard, forcing a full table scan. The database cannot use B-tree indexes for prefix wildcards.",
+                        confidence=0.90,
+                        severity="medium"
+                    ))
+                    suggestions.append(create_suggestion(
+                        title="Remove leading wildcard or use full-text search",
+                        explanation="If possible, use 'prefix%' instead of '%suffix'. For complex text search, consider database full-text search features or dedicated search engines like Elasticsearch.",
+                        confidence=0.85
+                    ))
+                    break  # Only report once per condition
+                
+                # Skip past this quoted string
+                i += 1
+                while i < len(condition) and condition[i] != quote_char:
+                    i += 1
+                i += 1
+            else:
+                i += 1
     
     return issues, suggestions
 
