@@ -6,7 +6,37 @@ A simple CLI tool that accepts SQL queries and provides analysis insights.
 
 from tokenizer import tokenize, TokenType, tokenize_ignore_whitespace
 from parser import parse_query
-from analyzer import analyze_query as analyze_parsed_query
+from analyzer import analyze_query as analyze_parsed_query, SEVERITY_PENALTY
+
+
+def calculate_score(issues: list[dict]) -> tuple[int, str]:
+    """
+    Calculates performance score and risk level from issues.
+    
+    Args:
+        issues: List of issue dictionaries with 'severity' field
+        
+    Returns:
+        Tuple of (score 0-100, risk level string)
+    """
+    total_penalty = 0
+    for issue in issues:
+        severity = issue.get("severity", "medium")
+        total_penalty += SEVERITY_PENALTY.get(severity, 10)
+    
+    score = max(0, 100 - total_penalty)
+    
+    # Determine risk level
+    if score >= 85:
+        risk = "Low"
+    elif score >= 60:
+        risk = "Medium"
+    elif score >= 30:
+        risk = "High"
+    else:
+        risk = "Critical"
+    
+    return score, risk
 
 
 def format_parsed_structure(parsed) -> str:
@@ -124,12 +154,17 @@ def format_results(results: dict) -> str:
     # Token stats
     lines.append(f"\n📊 Token Count: {results.get('token_count', 0)} (excluding whitespace)")
     
+    # Calculate and display score
+    issues = results.get("issues", [])
+    score, risk = calculate_score(issues)
+    lines.append(f"\n🎯 Performance Score: {score}/100  |  Risk Level: {risk}")
+    
     # Issues section
     lines.append("\n📋 Issues Found:")
-    issues = results.get("issues", [])
     if issues:
         for i, issue in enumerate(issues, 1):
-            lines.append(f"\n  {i}. {issue['issue']}")
+            sev = issue.get("severity", "medium").upper()
+            lines.append(f"\n  {i}. [{sev}] {issue['issue']}")
             lines.append(f"     Confidence: {issue['confidence']:.0%}")
             lines.append(f"     {issue['explanation']}")
     else:

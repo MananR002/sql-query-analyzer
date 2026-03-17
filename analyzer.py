@@ -8,12 +8,28 @@ from parser import ParsedQuery
 from tokenizer import Token, TokenType, SQL_KEYWORDS
 
 
-def create_issue(title: str, explanation: str, confidence: float) -> dict:
-    """Creates a structured issue dictionary."""
+# Severity penalty points
+SEVERITY_PENALTY = {
+    "high": 25,
+    "medium": 10,
+    "low": 5
+}
+
+def create_issue(title: str, explanation: str, confidence: float, severity: str = "medium") -> dict:
+    """
+    Creates a structured issue dictionary.
+    
+    Args:
+        title: Short issue title
+        explanation: Detailed explanation
+        confidence: Confidence score 0-1
+        severity: Impact level - "high", "medium", or "low"
+    """
     return {
         "issue": title,
         "explanation": explanation,
-        "confidence": round(confidence, 2)
+        "confidence": round(confidence, 2),
+        "severity": severity
     }
 
 
@@ -123,7 +139,8 @@ def analyze_select_star(parsed: ParsedQuery) -> tuple[list[dict], list[dict]]:
         issues.append(create_issue(
             title="SELECT * retrieves all columns",
             explanation="Using SELECT * fetches every column from the table, which increases network overhead, memory usage, and can break application code if table schema changes. It also prevents the query optimizer from using covering indexes.",
-            confidence=0.95
+            confidence=0.95,
+            severity="high"
         ))
         suggestions.append(create_suggestion(
             title="Specify only the columns you need",
@@ -149,7 +166,8 @@ def analyze_missing_where(parsed: ParsedQuery) -> tuple[list[dict], list[dict]]:
             issues.append(create_issue(
                 title="SELECT without WHERE may scan entire table",
                 explanation="Without a WHERE clause, the database must read every row in the table. This is slow for large tables and wastes I/O and memory resources.",
-                confidence=0.90
+                confidence=0.90,
+                severity="high"
             ))
             suggestions.append(create_suggestion(
                 title="Add a WHERE clause to filter rows",
@@ -160,7 +178,8 @@ def analyze_missing_where(parsed: ParsedQuery) -> tuple[list[dict], list[dict]]:
             issues.append(create_issue(
                 title="UPDATE without WHERE modifies all rows",
                 explanation="This is a dangerous operation that will change every row in the table. In production, this could corrupt all your data.",
-                confidence=1.0
+                confidence=1.0,
+                severity="high"
             ))
             suggestions.append(create_suggestion(
                 title="Add a WHERE clause to limit affected rows",
@@ -171,7 +190,8 @@ def analyze_missing_where(parsed: ParsedQuery) -> tuple[list[dict], list[dict]]:
             issues.append(create_issue(
                 title="DELETE without WHERE removes all rows",
                 explanation="This will delete every row in the table. Without a backup, this data loss may be unrecoverable.",
-                confidence=1.0
+                confidence=1.0,
+                severity="high"
             ))
             suggestions.append(create_suggestion(
                 title="Add a WHERE clause to limit deletions",
@@ -231,7 +251,8 @@ def analyze_like_patterns(parsed: ParsedQuery) -> tuple[list[dict], list[dict]]:
                         issues.append(create_issue(
                             title="LIKE pattern with leading wildcard cannot use index",
                             explanation=f"The pattern '{pattern}' starts with a wildcard, forcing a full table scan. The database cannot use B-tree indexes for prefix wildcards.",
-                            confidence=0.90
+                            confidence=0.90,
+                            severity="medium"
                         ))
                         suggestions.append(create_suggestion(
                             title="Remove leading wildcard or use full-text search",
@@ -260,7 +281,8 @@ def analyze_not_conditions(parsed: ParsedQuery) -> tuple[list[dict], list[dict]]
             issues.append(create_issue(
                 title="NOT IN can be slow and has NULL handling issues",
                 explanation="NOT IN performs poorly on large lists and returns no results if the subquery contains NULL values, which can cause subtle bugs.",
-                confidence=0.80
+                confidence=0.80,
+                severity="medium"
             ))
             suggestions.append(create_suggestion(
                 title="Use LEFT JOIN with IS NULL or NOT EXISTS instead",
@@ -322,7 +344,8 @@ def analyze_functions_in_where(parsed: ParsedQuery) -> tuple[list[dict], list[di
                 issues.append(create_issue(
                     title=f"Function {func_name}() on column prevents index usage",
                     explanation=f"Applying {func_name}() to a column in the WHERE clause forces the database to evaluate the function for every row, preventing index lookups.",
-                    confidence=0.85
+                    confidence=0.85,
+                    severity="medium"
                 ))
                 suggestions.append(create_suggestion(
                     title="Store pre-computed values or use a computed column",
